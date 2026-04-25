@@ -1,176 +1,231 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
-interface CommandOutput {
+interface HistoryEntry {
   id: string;
   command: string;
   output: React.ReactNode;
 }
 
 export default function Terminal() {
-  const [history, setHistory] = useState<CommandOutput[]>([]);
+  const [phase, setPhase] = useState<"typing" | "scanning" | "interactive">("typing");
+  const [typedText, setTypedText] = useState("");
+  const [scanLines, setScanLines] = useState<React.ReactNode[]>([]);
+  const [history, setHistory] = useState<HistoryEntry[]>([]);
   const [input, setInput] = useState("");
-  const [isScanning, setIsScanning] = useState(false);
-  const [scanStep, setScanStep] = useState(0);
+  const [isRunning, setIsRunning] = useState(false);
+  const [runStep, setRunStep] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
-  const terminalRef = useRef<HTMLDivElement>(null);
+  const bodyRef = useRef<HTMLDivElement>(null);
 
-  const focusInput = () => {
-    inputRef.current?.focus();
-  };
+  const scroll = useCallback(() => {
+    if (bodyRef.current) bodyRef.current.scrollTop = bodyRef.current.scrollHeight;
+  }, []);
+
+  useEffect(scroll, [typedText, scanLines, history, input, runStep, scroll]);
+
+  // ── Phase 1: type out the command character by character ──
+  const command = "kramscan scan https://example.com";
 
   useEffect(() => {
-    if (terminalRef.current) {
-      terminalRef.current.scrollTop = terminalRef.current.scrollHeight;
-    }
-  }, [history, input, scanStep]);
-
-  useEffect(() => {
-    if (isScanning) {
-      const steps = [
-        { delay: 500, step: 1 },
-        { delay: 1500, step: 2 },
-        { delay: 3000, step: 3 },
-        { delay: 4500, step: 4 },
-      ];
-      
-      const timeouts = steps.map((s) =>
-        setTimeout(() => {
-          setScanStep(s.step);
-          if (s.step === 4) {
-            setIsScanning(false);
-          }
-        }, s.delay)
-      );
-
-      return () => timeouts.forEach(clearTimeout);
-    }
-  }, [isScanning]);
-
-  const handleCommand = (e: React.KeyboardEvent<HTMLInputElement>) => {
-    if (e.key === "Enter" && !isScanning) {
-      const cmd = input.trim();
-      let output: React.ReactNode = null;
-
-      if (cmd === "") {
-        output = "";
-      } else if (cmd === "help") {
-        output = (
-          <div style={{ color: '#a3a3a3' }}>
-            Available commands:<br/>
-            - <span style={{ color: 'var(--accent-green)' }}>kramscan scan &lt;url&gt;</span>: Start a vulnerability scan<br/>
-            - <span style={{ color: 'var(--accent-green)' }}>kramscan --version</span>: Display version info<br/>
-            - <span style={{ color: 'var(--accent-green)' }}>clear</span>: Clear terminal output<br/>
-            - <span style={{ color: 'var(--accent-green)' }}>whoami</span>: Print current user
-          </div>
-        );
-      } else if (cmd === "clear") {
-        setHistory([]);
-        setInput("");
-        return;
-      } else if (cmd === "kramscan --version" || cmd === "kramscan -v") {
-        output = <div style={{ color: '#a3a3a3' }}>kramscan v0.4.0</div>;
-      } else if (cmd === "whoami") {
-        output = <div style={{ color: '#a3a3a3' }}>security_auditor</div>;
-      } else if (cmd.startsWith("kramscan scan ")) {
-        setIsScanning(true);
-        setScanStep(0);
-        output = <div style={{ color: '#a3a3a3' }}>Starting scan...</div>;
-      } else {
-        output = <div style={{ color: 'var(--accent-red)' }}>kramscan: command not found: {cmd.split(" ")[0]}</div>;
+    if (phase !== "typing") return;
+    let i = 0;
+    const iv = setInterval(() => {
+      i++;
+      setTypedText(command.slice(0, i));
+      if (i >= command.length) {
+        clearInterval(iv);
+        setTimeout(() => setPhase("scanning"), 400);
       }
+    }, 45);
+    return () => clearInterval(iv);
+  }, [phase]);
 
-      setHistory((prev) => [
-        ...prev,
-        { id: Math.random().toString(36).substr(2, 9), command: cmd, output },
-      ]);
+  // ── Phase 2: simulate scan output line by line ──
+  useEffect(() => {
+    if (phase !== "scanning") return;
+
+    const lines: { node: React.ReactNode; delay: number }[] = [
+      { delay: 300, node: <span style={{ color: "#737373" }}>[+] Initializing KramScan v0.4.0...</span> },
+      { delay: 700, node: <span style={{ color: "#737373" }}>[+] Loading 10 plugins: XSS, SQLi, CSRF, CORS, Headers...</span> },
+      { delay: 1200, node: <span style={{ color: "#737373" }}>[+] Launching headless browser...</span> },
+      { delay: 2000, node: <span style={{ color: "#737373" }}>[+] Crawling 42 pages...</span> },
+      { delay: 2800, node: <><span style={{ color: "var(--yellow)" }}>[!]</span> <span style={{ color: "#c8c8c8" }}>Missing Security Headers</span> <span style={{ color: "#737373" }}>on /login</span></> },
+      { delay: 3400, node: <><span style={{ color: "var(--red)" }}>[!]</span> <span style={{ color: "#c8c8c8" }}>Reflected XSS</span> <span style={{ color: "#737373" }}>on /search?q=</span></> },
+      { delay: 4000, node: <><span style={{ color: "var(--yellow)" }}>[!]</span> <span style={{ color: "#c8c8c8" }}>CORS Misconfiguration</span> <span style={{ color: "#737373" }}>on /api/v1/users</span></> },
+      { delay: 4800, node: <span style={{ color: "#737373" }}>[+] Running AI analysis (Claude-3.5-Sonnet)...</span> },
+      { delay: 5600, node: <span style={{ color: "#737373" }}>[+] Generating remediation report...</span> },
+      { delay: 6400, node: <span style={{ color: "#f0f0f0" }}>Scan complete — 2 high, 1 medium finding. Report → ~/.kramscan/reports/scanreport.pdf</span> },
+    ];
+
+    const timeouts = lines.map((l) =>
+      setTimeout(() => {
+        setScanLines((prev) => [...prev, l.node]);
+      }, l.delay)
+    );
+
+    const finishTimeout = setTimeout(() => {
+      setPhase("interactive");
+    }, 7200);
+
+    return () => {
+      timeouts.forEach(clearTimeout);
+      clearTimeout(finishTimeout);
+    };
+  }, [phase]);
+
+  // ── Focus input when interactive ──
+  useEffect(() => {
+    if (phase === "interactive") inputRef.current?.focus();
+  }, [phase, isRunning]);
+
+  // ── Handle user commands ──
+  const handleCommand = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key !== "Enter" || isRunning) return;
+    const cmd = input.trim();
+
+    if (cmd === "clear") {
+      setHistory([]);
+      setScanLines([]);
+      setTypedText("");
       setInput("");
+      return;
     }
+
+    let output: React.ReactNode = null;
+
+    if (cmd === "") {
+      output = null;
+    } else if (cmd === "help") {
+      output = (
+        <div style={{ color: "#737373" }}>
+          <span style={{ color: "var(--green)" }}>kramscan scan &lt;url&gt;</span>{"  "}Full vulnerability scan<br />
+          <span style={{ color: "var(--green)" }}>kramscan --version</span>{"     "}Show version<br />
+          <span style={{ color: "var(--green)" }}>kramscan doctor</span>{"        "}Check environment<br />
+          <span style={{ color: "var(--green)" }}>whoami</span>{"                "}Current user<br />
+          <span style={{ color: "var(--green)" }}>clear</span>{"                 "}Clear terminal
+        </div>
+      );
+    } else if (cmd === "kramscan --version" || cmd === "kramscan -v") {
+      output = <span style={{ color: "#737373" }}>kramscan/0.4.0 node/v20.11.0 win32-x64</span>;
+    } else if (cmd === "whoami") {
+      output = <span style={{ color: "#737373" }}>security_auditor</span>;
+    } else if (cmd === "kramscan doctor") {
+      output = (
+        <div style={{ color: "#737373" }}>
+          <span style={{ color: "var(--green)" }}>✓</span> Node.js v20.11.0<br />
+          <span style={{ color: "var(--green)" }}>✓</span> Puppeteer installed<br />
+          <span style={{ color: "var(--green)" }}>✓</span> AI provider configured (Anthropic)<br />
+          <span style={{ color: "var(--green)" }}>✓</span> Config loaded from ~/.kramscan/config.json<br />
+          All checks passed.
+        </div>
+      );
+    } else if (cmd.startsWith("kramscan scan ")) {
+      const url = cmd.replace("kramscan scan ", "");
+      setIsRunning(true);
+      setRunStep(0);
+      output = <span style={{ color: "#737373" }}>Starting scan on {url}...</span>;
+
+      setHistory((prev) => [...prev, { id: crypto.randomUUID(), command: cmd, output }]);
+      setInput("");
+      return;
+    } else {
+      output = <span style={{ color: "var(--red)" }}>command not found: {cmd.split(" ")[0]}</span>;
+    }
+
+    setHistory((prev) => [...prev, { id: crypto.randomUUID(), command: cmd, output }]);
+    setInput("");
   };
+
+  // ── Animate user-triggered scan ──
+  useEffect(() => {
+    if (!isRunning) return;
+    const steps: { delay: number; step: number }[] = [
+      { delay: 500, step: 1 },
+      { delay: 1400, step: 2 },
+      { delay: 2800, step: 3 },
+      { delay: 4200, step: 4 },
+    ];
+    const timeouts = steps.map((s) =>
+      setTimeout(() => {
+        setRunStep(s.step);
+        if (s.step === 4) setIsRunning(false);
+      }, s.delay)
+    );
+    return () => timeouts.forEach(clearTimeout);
+  }, [isRunning]);
 
   return (
-    <div className="terminal-window" onClick={focusInput} style={{ cursor: "text", height: "400px", display: "flex", flexDirection: "column" }}>
+    <div
+      className="terminal-window"
+      onClick={() => inputRef.current?.focus()}
+      style={{ cursor: "text", height: "380px", display: "flex", flexDirection: "column" }}
+    >
       <div className="terminal-header" style={{ cursor: "default" }}>
         <div className="terminal-dots">
-          <div className="dot red"></div>
-          <div className="dot yellow"></div>
-          <div className="dot green"></div>
+          <div className="dot red" />
+          <div className="dot yellow" />
+          <div className="dot green" />
         </div>
-        <div className="terminal-title">user@kramscan: ~</div>
+        <div className="terminal-title mono">user@kramscan: ~</div>
       </div>
-      <div className="terminal-body mono" ref={terminalRef} style={{ flexGrow: 1, overflowY: "auto" }}>
-        <div style={{ color: '#a3a3a3', marginBottom: '1rem' }}>
-          Welcome to KramScan CLI v0.4.0.<br/>
-          Type <span style={{ color: 'var(--accent-green)' }}>help</span> to see available commands, or try <span style={{ color: 'var(--accent-green)' }}>kramscan scan https://example.com</span>
-        </div>
 
-        {history.map((entry) => (
-          <div key={entry.id} style={{ marginBottom: '10px' }}>
+      <div className="terminal-body mono" ref={bodyRef} style={{ flexGrow: 1, overflowY: "auto" }}>
+        {/* ── Intro simulation ── */}
+        {(phase === "typing" || phase === "scanning" || (phase === "interactive" && typedText)) && (
+          <div style={{ marginBottom: "12px" }}>
             <div>
-              <span style={{ color: "var(--accent-blue)" }}>~</span> <span style={{ color: "var(--accent-green)" }}>$</span> {entry.command}
+              <span style={{ color: "var(--blue)" }}>~</span>{" "}
+              <span style={{ color: "var(--green)" }}>$</span>{" "}
+              {typedText}
+              {phase === "typing" && <span className="cursor" />}
+            </div>
+            {scanLines.map((line, i) => (
+              <div key={i}>{line}</div>
+            ))}
+          </div>
+        )}
+
+        {/* ── Waiting indicator during scan sim ── */}
+        {phase === "scanning" && (
+          <div style={{ marginTop: "4px" }}>
+            <span className="cursor" />
+          </div>
+        )}
+
+        {/* ── Interactive history ── */}
+        {phase === "interactive" && history.map((entry) => (
+          <div key={entry.id} style={{ marginBottom: "10px" }}>
+            <div>
+              <span style={{ color: "var(--blue)" }}>~</span>{" "}
+              <span style={{ color: "var(--green)" }}>$</span>{" "}
+              {entry.command}
             </div>
             {entry.output}
-            {entry.command.startsWith("kramscan scan ") && isScanning === false && history[history.length-1].id === entry.id && scanStep === 4 && (
-              <div style={{ marginTop: '10px' }}>
-                <div style={{ color: '#a3a3a3' }}>
-                  [+] Initializing KramScan v0.4.0...<br/>
-                  [+] Loading plugins: XSS, SQLi, CSRF, CORS, OpenRedirect...<br/>
-                  [+] Starting headless browser...
-                </div>
-                <div style={{ marginTop: '10px' }}>
-                  <span style={{ color: 'var(--accent-yellow)' }}>[!] Vulnerability Found:</span> Missing Security Headers on /login<br/>
-                  <span style={{ color: 'var(--accent-red)' }}>[!] Vulnerability Found:</span> Reflected XSS on /search?q=<br/>
-                  [+] Crawling 42 pages...
-                </div>
-                <div style={{ marginTop: '10px' }}>
-                  [+] Engaging AI Analysis Engine (Claude-3.5-Sonnet)...<br/>
-                  [+] Generating actionable remediation steps...
-                </div>
-                <div style={{ marginTop: '10px', color: '#fff' }}>
-                  <br/>
-                  Scan complete! 2 high, 1 medium issues found.<br/>
-                  Report saved to ~/.kramscan/reports/scanreport.pdf
-                </div>
-              </div>
-            )}
-            {entry.command.startsWith("kramscan scan ") && isScanning && history[history.length-1].id === entry.id && (
-              <div style={{ marginTop: '10px' }}>
-                {scanStep >= 1 && (
-                  <div className="animate-fade-in-up" style={{ color: '#a3a3a3' }}>
-                    [+] Initializing KramScan v0.4.0...<br/>
-                    [+] Loading plugins: XSS, SQLi, CSRF, CORS, OpenRedirect...<br/>
-                    [+] Starting headless browser...
+
+            {/* user-triggered scan output */}
+            {entry.command.startsWith("kramscan scan ") && (isRunning || runStep > 0) && entry.id === history[history.length - 1]?.id && (
+              <div style={{ marginTop: "6px" }}>
+                {runStep >= 1 && <div style={{ color: "#737373" }}>[+] Loading plugins... Starting headless browser...</div>}
+                {runStep >= 2 && (
+                  <div>
+                    <span style={{ color: "var(--yellow)" }}>[!]</span> Missing Security Headers on /login<br />
+                    <span style={{ color: "var(--red)" }}>[!]</span> Reflected XSS on /search?q=
                   </div>
                 )}
-                {scanStep >= 2 && (
-                  <div className="animate-fade-in-up" style={{ marginTop: '10px' }}>
-                    <span style={{ color: 'var(--accent-yellow)' }}>[!] Vulnerability Found:</span> Missing Security Headers on /login<br/>
-                    <span style={{ color: 'var(--accent-red)' }}>[!] Vulnerability Found:</span> Reflected XSS on /search?q=<br/>
-                    [+] Crawling 42 pages...
-                  </div>
-                )}
-                {scanStep >= 3 && (
-                  <div className="animate-fade-in-up" style={{ marginTop: '10px' }}>
-                    [+] Engaging AI Analysis Engine (Claude-3.5-Sonnet)...<br/>
-                    [+] Generating actionable remediation steps...
-                  </div>
-                )}
-                {scanStep >= 4 && (
-                  <div className="animate-fade-in-up" style={{ marginTop: '10px', color: '#fff' }}>
-                    <br/>
-                    Scan complete! 2 high, 1 medium issues found.<br/>
-                    Report saved to ~/.kramscan/reports/scanreport.pdf
-                  </div>
-                )}
+                {runStep >= 3 && <div style={{ color: "#737373" }}>[+] Running AI analysis...</div>}
+                {runStep >= 4 && <div style={{ color: "#f0f0f0" }}>Scan complete — 2 high, 1 medium. Report saved.</div>}
               </div>
             )}
           </div>
         ))}
 
-        {!isScanning && (
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <span style={{ color: "var(--accent-blue)" }}>~</span> <span style={{ color: "var(--accent-green)", marginLeft: '4px', marginRight: '8px' }}>$</span>
+        {/* ── Input prompt ── */}
+        {phase === "interactive" && !isRunning && (
+          <div style={{ display: "flex", alignItems: "center" }}>
+            <span style={{ color: "var(--blue)" }}>~</span>
+            <span style={{ color: "var(--green)", marginLeft: "4px", marginRight: "8px" }}>$</span>
             <input
               ref={inputRef}
               type="text"
@@ -180,12 +235,12 @@ export default function Terminal() {
               style={{
                 background: "transparent",
                 border: "none",
-                color: "var(--accent-green)",
+                color: "var(--green)",
                 fontFamily: "var(--font-fira-code), monospace",
-                fontSize: "0.95rem",
+                fontSize: "0.88rem",
                 outline: "none",
                 flexGrow: 1,
-                width: "100%"
+                caretColor: "var(--green)",
               }}
               autoFocus
               spellCheck={false}
@@ -193,10 +248,10 @@ export default function Terminal() {
             />
           </div>
         )}
-        {isScanning && (
-          <div style={{ display: 'flex', alignItems: 'center' }}>
-            <span className="cursor" style={{ marginTop: '10px' }}></span>
-          </div>
+
+        {/* ── Busy cursor during user scan ── */}
+        {phase === "interactive" && isRunning && (
+          <div style={{ marginTop: "6px" }}><span className="cursor" /></div>
         )}
       </div>
     </div>

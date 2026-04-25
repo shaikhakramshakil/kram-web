@@ -13,11 +13,10 @@ const firaCode = Fira_Code({
 });
 
 export const metadata: Metadata = {
-  title: "KramScan - AI-Powered Web Application Security Testing CLI",
-  description: "Command-line security auditing tool that combines automated vulnerability scanning with multi-provider AI analysis.",
-  icons: {
-    icon: "/favicon.ico",
-  },
+  title: "KramScan | AI-Powered Security Scanning CLI",
+  description: "Orchestrate headless browser crawling, run modular vulnerability plugins, and generate AI-driven security reports with KramScan.",
+  keywords: ["security", "cli", "vulnerability-scanner", "ai", "pentesting", "automation"],
+  authors: [{ name: "Akram Shaikh" }],
 };
 
 export default function RootLayout({
